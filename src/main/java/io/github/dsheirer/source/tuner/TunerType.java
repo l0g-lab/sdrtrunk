@@ -45,6 +45,8 @@ public enum TunerType
     RSP_DUO_1("RSPduo Tuner 1"),
     RSP_DUO_2("RSPduo Tuner 2"),
     RSP_DX("RSPdx"),
+	BLADERF_ONE("BladeRF1"),
+	BLADERF_TWO("BladeRF2"),
 
     TEST("Test"),
     RECORDING("Recording"),
@@ -73,7 +75,7 @@ public enum TunerType
      * Supported USB tuner types
      */
     public static EnumSet<TunerType> SUPPORTED_USB_TUNERS = EnumSet.of(AIRSPY_R820T, ELONICS_E4000, FITIPOWER_FC0012,
-            HACKRF_JAWBREAKER, HACKRF_RAD1O, HACKRF_ONE, RAFAELMICRO_R820T);
+            HACKRF_JAWBREAKER, HACKRF_RAD1O, HACKRF_ONE, RAFAELMICRO_R820T, BLADERF_ONE, BLADERF_TWO);
 
     /**
      * Supported sound card tuner types
