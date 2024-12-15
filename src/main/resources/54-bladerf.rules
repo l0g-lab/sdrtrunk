@@ -1,2 +1,1 @@
 ATTR{idVendor}=="2cf0", ATTR{idProduct}=="5246", SYMLINK+="bladerf-two-%k", MODE="660", GROUP="plugdev"
-ATTR{idVendor}=="1d50", ATTR{idProduct}=="6066", SYMLINK+="bladerf-one-%k", MODE="660", GROUP="plugdev"

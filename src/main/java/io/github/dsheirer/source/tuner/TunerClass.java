@@ -126,7 +126,6 @@ public enum TunerClass
 				return AIRSPY;
 			case 0x03EB800C:
 				return AIRSPY_HF;
-			case 0x2CF05246: //BLADERF TWO
 			case 0x1D506066: //BLADERF ONE
 				return BLADERF;
 		}
