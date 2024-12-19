@@ -97,6 +97,11 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 	}
 
+	//public BoardID getBoardID() throws UsbException {
+	//	int id = readByte(Request.BOARD_ID_READ, (byte)0, (byte)0, false);
+	//	return BoardID.lookup(id);
+	//}
+
 	/**
 	 * BladeRF firmware version string -- is this needed for BladeRF??
 	 */
