@@ -294,6 +294,35 @@ public class BladeRFTunerController extends USBTunerController {
         return mSampleRate.getRate();
     }
 
+	public enum BoardID {
+		BLADERF(0, "BladeRF"),
+		UNKNOWN(-1, "Unknown");
+
+		private int mValue;
+		private String mLabel;
+
+		BoardID(int value, String label) {
+			mValue = value;
+			mLabel = label;
+		}
+
+		public int getValue() {
+			return mValue;
+		}
+
+		public String getLabel() {
+			return mLabel;
+		}
+
+		public static BoardID fromValue(int value) {
+			if(value == 0) {
+				return BLADERF;
+			}
+
+			return UNKNOWN;
+		}
+	}
+
     public enum Request {
         SET_TRANSCEIVER_MODE(1),
         MAX2837_TRANSCEIVER_WRITE(2),

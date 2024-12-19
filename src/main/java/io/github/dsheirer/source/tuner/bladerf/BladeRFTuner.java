@@ -4,6 +4,7 @@ import io.github.dsheirer.preference.source.ChannelizerType;
 import io.github.dsheirer.source.tuner.ITunerErrorListener;
 import io.github.dsheirer.source.tuner.Tuner;
 import io.github.dsheirer.source.tuner.TunerClass;
+import io.github.dsheirer.source.tuner.bladerf.BladeRFTunerController.BoardID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +52,7 @@ public class BladeRFTuner extends Tuner {
 		return 11.0;
 	}
 
-	/**@Override
+	@Override
 	public String getUniqueID()	{
 		try {
 			return getTunerClass().toString() + " " + getController().getSerial().getSerialNumber();
@@ -60,8 +61,8 @@ public class BladeRFTuner extends Tuner {
 			mLog.error("error getting serial number", e);
 		}
 
-		return Serial().getSerialNumber();
-	}*/
+		return BoardID.BLADERF.getLabel();
+	}
 
 	@Override
 	public int getMaximumUSBBitsPerSecond() {
