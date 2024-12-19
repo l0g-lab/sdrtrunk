@@ -28,15 +28,14 @@ public class BladeRFTunerController extends USBTunerController {
     public static final byte REQUEST_TYPE_IN = (byte)(LibUsb.ENDPOINT_IN | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
     public static final byte REQUEST_TYPE_OUT = (byte)(LibUsb.ENDPOINT_OUT | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
 
-    public static final long MINIMUM_TUNABLE_FREQUENCY_HZ = 700000000l; // 47MHz
-    public static final long MAXIMUM_TUNABLE_FREQUENCY_HZ = 6000000000l; // 6GHz
+    public static final long MINIMUM_TUNABLE_FREQUENCY_HZ = 470000000l; // 47MHz
+    public static final long MAXIMUM_TUNABLE_FREQUENCY_HZ = 60000000000l; // 6GHz
     public static final long DEFAULT_FREQUENCY = 101100000; // 101.1MHz
     public static final double USABLE_BANDWIDTH = 0.90;
     public static final int DC_HALF_BANDWIDTH = 5000;
 
     private INativeBufferFactory mNativeBufferFactory = new SignedByteNativeBufferFactory();
     private BladeRFSampleRate mSampleRate = BladeRFSampleRate.RATE_5_0;
-    private boolean mAmplifierEnabled = false;
 
 	/**
 	 * Constructs an instance
@@ -62,6 +61,11 @@ public class BladeRFTunerController extends USBTunerController {
 
 	@Override
 	protected int getTransferBufferSize() {
+		return USB_TRANSFER_BUFFER_SIZE;
+	}
+	
+	@Override
+	public int getBufferSampleCount() {
 		return USB_TRANSFER_BUFFER_SIZE / 2; // may need to modify this
 	}
 
@@ -83,7 +87,7 @@ public class BladeRFTunerController extends USBTunerController {
 	/**
 	 * Devices shutdown actions invoked by the parent stop() method
 	 */
-	@override
+	@Override
 	protected void deviceStop() {
 		try {
 			setMode(Mode.OFF); // does this work for BladeRF??
@@ -115,13 +119,13 @@ public class BladeRFTunerController extends USBTunerController {
 	 * Sets the BladeRF transciever mode -- this will likely need to be updated, bladerf specific
 	 */
 	public void setMode(Mode mode) throws UsbException {
-		write(Request.SET_TRANCEIVER_MODE, mode.getNumber(), 0);
+		write(Request.SET_TRANSCEIVER_MODE, mode.getNumber(), 0);
 	}
 
 	/**
 	 * Sets the BladeRF RX Channel
 	 */
-	public void setChannel(Channel channel) throws UsbExcpetion {
+	public void setChannel(BladeRFrxChannel channel) throws UsbException {
 		write(Request.SET_CHANNEL, channel.getNumber(), 0);
 	}
 
@@ -210,7 +214,7 @@ public class BladeRFTunerController extends USBTunerController {
 		return buffer;
 	}
 
-	public in read(Request request, int value, int index, int length) throws UsbException {
+	public int read(Request request, int value, int index, int length) throws UsbException {
 		if(!(length == 1 || length == 2 || length == 4)) {
             throw new IllegalArgumentException("invalid length [" + length +
                 "] must be: byte=1, short=2, int=4 to read a primitive");
@@ -273,7 +277,7 @@ public class BladeRFTunerController extends USBTunerController {
 
         setSampleRateManual(rate.getRate(), 1);
         mFrequencyController.setSampleRate(rate.getRate());
-        setBandwidthSetting(rate.getFilter());
+        //setBandwidthSetting(rate.getFilter()); -- this will get set with the SampleRate
         mSampleRate = rate;
         getNativeBufferFactory().setSamplesPerMillisecond((float)getSampleRate() / 1000.0f);
     }
@@ -312,7 +316,8 @@ public class BladeRFTunerController extends USBTunerController {
         SET_VGA_GAIN(20),
         SET_TXVGA_GAIN(21),
         ANTENNA_ENABLE(23),
-        SET_FREQUENCY_EXPLICIT(24);
+        SET_FREQUENCY_EXPLICIT(24),
+		SET_CHANNEL(25);
 
         private byte mRequestNumber;
 
@@ -325,34 +330,49 @@ public class BladeRFTunerController extends USBTunerController {
         }
     }
 
+	public enum BladeRFrxChannel {
+		RX_CHANNEL_0(0),
+		RX_CHANNEL_1(1);
+
+		private byte mChannel;
+
+		BladeRFrxChannel(int number) {
+			mChannel = (byte)number;
+		}
+
+		public byte getNumber() {
+			return mChannel;
+		}
+	}
+
 	public enum BladeRFSampleRate {
         //Changes to enumerate correct rates
-        RATE_1_75(1750000, "1.750 MHz", BandwidthSetting.F1_75),
-        RATE_2_5(2500000, "2.500 MHz", BandwidthSetting.F2_50),
-        RATE_3_5(3500000, "3.500 MHz", BandwidthSetting.F3_50),
-        RATE_5_0(5000000, "5.000 MHz", BandwidthSetting.F5_00),
-        RATE_5_5(5500000, "5.500 MHz", BandwidthSetting.F5_50),
-        RATE_6_0(6000000, "6.000 MHz", BandwidthSetting.F6_00),
-        RATE_7_0(7000000, "7.000 MHz", BandwidthSetting.F7_00),
-        RATE_8_0(8000000, "8.000 MHz", BandwidthSetting.F8_00),
-        RATE_9_0(9000000, "9.000 MHz", BandwidthSetting.F9_00),
-        RATE_10_0(10000000, "10.000 MHz", BandwidthSetting.F10_00),
-        RATE_12_0(12000000, "12.000 MHz", BandwidthSetting.F12_00),
-        RATE_14_0(14000000, "14.000 MHz", BandwidthSetting.F14_00),
-        RATE_15_0(15000000, "15.000 MHz", BandwidthSetting.F15_00),
-        RATE_20_0(20000000, "20.000 MHz", BandwidthSetting.F20_00);
+        RATE_1_75(1750000, "1.750 MHz", BladeRFBandwidthSetting.F1_75),
+        RATE_2_5(2500000, "2.500 MHz", BladeRFBandwidthSetting.F2_50),
+        RATE_3_5(3500000, "3.500 MHz", BladeRFBandwidthSetting.F3_50),
+        RATE_5_0(5000000, "5.000 MHz", BladeRFBandwidthSetting.F5_00),
+        RATE_5_5(5500000, "5.500 MHz", BladeRFBandwidthSetting.F5_50),
+        RATE_6_0(6000000, "6.000 MHz", BladeRFBandwidthSetting.F6_00),
+        RATE_7_0(7000000, "7.000 MHz", BladeRFBandwidthSetting.F7_00),
+        RATE_8_0(8000000, "8.000 MHz", BladeRFBandwidthSetting.F8_00),
+        RATE_9_0(9000000, "9.000 MHz", BladeRFBandwidthSetting.F9_00),
+        RATE_10_0(10000000, "10.000 MHz", BladeRFBandwidthSetting.F10_00),
+        RATE_12_0(12000000, "12.000 MHz", BladeRFBandwidthSetting.F12_00),
+        RATE_14_0(14000000, "14.000 MHz", BladeRFBandwidthSetting.F14_00),
+        RATE_15_0(15000000, "15.000 MHz", BladeRFBandwidthSetting.F15_00),
+        RATE_20_0(20000000, "20.000 MHz", BladeRFBandwidthSetting.F20_00);
 
         private int mRate;
         private String mLabel;
-        private BandwidthSetting mFilter;
+        private BladeRFBandwidthSetting mFilter;
 
-        BladeRFSampleRate(int rate, String label, BandwidthSetting filter) {
+        BladeRFSampleRate(int rate, String label, BladeRFBandwidthSetting filter) {
             mRate = rate;
             mLabel = label;
             mFilter = filter;
         }
 
-        public static EnumSet<BladeRFSampleRate> VALID_SAMPLE_RATES = EnumSet.range(RATE_1_75, RATE_40_0);
+        public static EnumSet<BladeRFSampleRate> VALID_SAMPLE_RATES = EnumSet.range(RATE_1_75, RATE_20_0);
 
         public int getRate() {
             return mRate;
@@ -366,7 +386,7 @@ public class BladeRFTunerController extends USBTunerController {
             return mLabel;
         }
 
-        public BandwidthSetting getFilter() {
+        public BladeRFBandwidthSetting getFilter() {
             return mFilter;
         }
 
@@ -375,7 +395,7 @@ public class BladeRFTunerController extends USBTunerController {
         }
     }
 
-	public enum BandwidthSetting {
+	public enum BladeRFBandwidthSetting {
 		FAUTO(0, "AUTO"),
         F1_75(1750000, "1.75 MHz"),
         F2_50(2500000, "2.50 MHz"),
@@ -397,7 +417,7 @@ public class BladeRFTunerController extends USBTunerController {
 		private int mBandwidth;
 		private String mLabel;
 
-		BandwidthSetting(int bandwidth, String label) {
+		BladeRFBandwidthSetting(int bandwidth, String label) {
 			mBandwidth = bandwidth;
 			mLabel = label;
 		}
@@ -492,7 +512,7 @@ public class BladeRFTunerController extends USBTunerController {
 			int part0 = EndianUtils.readSwappedInteger(mData, 0);
 			int part1 = EndianUtils.readSwappedInteger(mData, 4);
 
-			StringBuilder sb = new StringBuild();
+			StringBuilder sb = new StringBuilder();
 
 			sb.append(String.format("%08X", part0));
 			sb.append("-");
@@ -507,7 +527,7 @@ public class BladeRFTunerController extends USBTunerController {
 			int serial2 = EndianUtils.readSwappedInteger(mData, 16);
 			int serial3 = EndianUtils.readSwappedInteger(mData, 20);
 
-			StringBuilder sb = new StringBuild();
+			StringBuilder sb = new StringBuilder();
 
 			sb.append(String.format("%08X", serial0));
 			sb.append("-");
