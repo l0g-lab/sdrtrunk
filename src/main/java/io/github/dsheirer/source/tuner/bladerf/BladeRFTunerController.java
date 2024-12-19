@@ -123,6 +123,7 @@ public class BladeRFTunerController extends USBTunerController {
 	 */
 	public void setChannel(Channel channel) throws UsbExcpetion {
 		write(Request.SET_CHANNEL, channel.getNumber(), 0);
+	}
 
 	/**
 	 * Sets the IF LNA Gain
@@ -396,7 +397,7 @@ public class BladeRFTunerController extends USBTunerController {
 		private int mBandwidth;
 		private String mLabel;
 
-		BasebandFilter(int bandwidth, String label) {
+		BandwidthSetting(int bandwidth, String label) {
 			mBandwidth = bandwidth;
 			mLabel = label;
 		}

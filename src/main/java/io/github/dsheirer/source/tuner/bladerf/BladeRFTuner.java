@@ -26,7 +26,7 @@ public class BladeRFTuner extends Tuner
 	public BladeRFTuner(BladeRFTunerController controller, ITunerErrorListener tunerErrorListener,
 					ChannelizerType channelizType)
 	{
-		super(controller, tunerErrorListener, channelizerType)
+		super(controller, tunerErrorListener, channelizerType);
 	}
 
 	@Override

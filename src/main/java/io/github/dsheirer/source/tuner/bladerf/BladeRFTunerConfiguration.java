@@ -19,7 +19,7 @@ public class BladeRFTunerConfiguration extends TunerConfiguration {
         super(BladeRFTunerController.MINIMUM_TUNABLE_FREQUENCY_HZ, BladeRFTunerController.MAXIMUM_TUNABLE_FREQUENCY_HZ);
     }
 
-    public HackRFTunerConfiguration(String uniqueID)
+    public BladeRFTunerConfiguration(String uniqueID)
     {
         super(uniqueID);
     }
