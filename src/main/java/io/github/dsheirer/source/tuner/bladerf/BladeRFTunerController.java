@@ -9,6 +9,7 @@ import io.github.dsheirer.source.tuner.configuration.TunerConfiguration;
 import io.github.dsheirer.source.tuner.usb.USBTunerController;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.EnumSet;
 import org.apache.commons.io.EndianUtils;
@@ -22,14 +23,14 @@ import javax.usb.UsbException;
 public class BladeRFTunerController extends USBTunerController {
 	private final static Logger mLog = LoggerFactory.getLogger(BladeRFTunerController.class);
 
-	public final static long USB_TIMEOUT_US = 1000000l; //uSeconds -- not sure yet
+	public final static long USB_TIMEOUT_US = 1000000L; //uSeconds - 1000ms
 	public static final int USB_TRANSFER_BUFFER_SIZE = 262144; // not sure yet
-
-    public static final byte REQUEST_TYPE_IN = (byte)(LibUsb.ENDPOINT_IN | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
-    public static final byte REQUEST_TYPE_OUT = (byte)(LibUsb.ENDPOINT_OUT | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
-
-    public static final long MINIMUM_TUNABLE_FREQUENCY_HZ = 470000000l; // 47MHz
-    public static final long MAXIMUM_TUNABLE_FREQUENCY_HZ = 60000000000l; // 6GHz
+    //public static final byte REQUEST_TYPE_IN = (byte)(LibUsb.ENDPOINT_IN | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
+    //public static final byte REQUEST_TYPE_OUT = (byte)(LibUsb.ENDPOINT_OUT | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
+    public static final byte REQUEST_HOST_TO_DEVICE = (byte)0x00; // LibUsb.ENDPOINT_OUT
+    public static final byte REQUEST_DEVICE_TO_HOST = (byte)0x80; // LibUsb.ENDPOINT_IN
+    public static final long MINIMUM_TUNABLE_FREQUENCY_HZ = 47000000l; // 47MHz
+    public static final long MAXIMUM_TUNABLE_FREQUENCY_HZ = 6000000000l; // 6GHz
     public static final long DEFAULT_FREQUENCY = 101100000; // 101.1MHz
     public static final double USABLE_BANDWIDTH = 0.90;
     public static final int DC_HALF_BANDWIDTH = 5000;
@@ -75,7 +76,15 @@ public class BladeRFTunerController extends USBTunerController {
 	 */
 	protected void deviceStart() throws SourceException {
 		try {
+			mLog.info("============= This is BladeRFTunerController which extends the USBTunerController... USBTunerController calls the deviceStart() function ==============");
+			mLog.info("Here is the LibUsb device from the getDevice() call: " + getDevice());
+			mLog.info("Here is the device handle from the getDeviceHandle() call: " + getDeviceHandle());
+			mLog.info("Here is the device descriptor from the getDeviceDescriptor() call: \n" + getDeviceDescriptor());
+			mLog.info("Here is the serial number: " + getSerial().getSerialNumber());
+
+			mLog.info("The first step is to do the configuration on the BladeRF... setting receive node, channel, etc");
 			setMode(Mode.RECEIVE);
+			mLog.info("This is second step");
 			setFrequency(DEFAULT_FREQUENCY);
 		}
 		catch(Exception e) {
@@ -97,10 +106,10 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 	}
 
-	//public BoardID getBoardID() throws UsbException {
-	//	int id = readByte(Request.BOARD_ID_READ, (byte)0, (byte)0, false);
-	//	return BoardID.lookup(id);
-	//}
+	public BoardID getBoardID() throws UsbException {
+		int id = readByte(Request.BOARD_ID_READ, (byte)0, (byte)0, false);
+		return BoardID.fromValue(id);
+	}
 
 	/**
 	 * BladeRF firmware version string -- is this needed for BladeRF??
@@ -116,7 +125,7 @@ public class BladeRFTunerController extends USBTunerController {
 	 * BladeRF part id number and serial number -- this will likely need to be updated bladerf specific
 	 */
 	public Serial getSerial() throws UsbException {
-		ByteBuffer buffer = readArray(Request.BOARD_PARTID_SERIALNO_READ, 0, 0, 24);
+		ByteBuffer buffer = readArray(Request.BOARD_PARTID_SERIALNO_READ, 0x0303, 0, 66);
 		return new Serial(buffer);
 	}
 
@@ -209,7 +218,7 @@ public class BladeRFTunerController extends USBTunerController {
 	public ByteBuffer readArray(Request request, int value, int index, int length) throws UsbException {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(length);
 
-		int transferred = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_TYPE_IN, request.getRequestNumber(),
+		int transferred = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_DEVICE_TO_HOST, request.getRequestNumber(),
 				(short)value, (short)index, buffer, USB_TIMEOUT_US);
 
 		if(transferred < 0) {
@@ -256,7 +265,7 @@ public class BladeRFTunerController extends USBTunerController {
     }
 
     public synchronized void write(Request request, int value, int index, ByteBuffer buffer) throws UsbException {
-        int status = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_TYPE_OUT, request.getRequestNumber(),
+        int status = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_HOST_TO_DEVICE, request.getRequestNumber(),
 			(short)value, (short)index, buffer, USB_TIMEOUT_US);
 
         if(status < LibUsb.SUCCESS) {
@@ -329,7 +338,13 @@ public class BladeRFTunerController extends USBTunerController {
 	}
 
     public enum Request {
-        SET_TRANSCEIVER_MODE(1),
+        
+		/** The following is HackRF way of doing the operations on the SDR
+		 * Set device to receive mode
+		 * Set Frequency
+		 * Set gain
+		 * etc
+		SET_TRANSCEIVER_MODE(1),
         MAX2837_TRANSCEIVER_WRITE(2),
         MAX2837_TRANSCEIVER_READ(3),
         SI5351C_CLOCK_GENERATOR_WRITE(4),
@@ -352,6 +367,19 @@ public class BladeRFTunerController extends USBTunerController {
         ANTENNA_ENABLE(23),
         SET_FREQUENCY_EXPLICIT(24),
 		SET_CHANNEL(25);
+		*/
+
+		OPEN_BLADERF(1),
+		SET_CHANNEL(2),
+		CHANNEL_CONFIG(3),
+		SET_FREQUENCY(4),
+		SET_SAMPLE_RATE(5),
+		BOARD_PARTID_SERIALNO_READ(6),
+		SET_LNA_GAIN(7), //the below were added so it doesn't break
+		BOARD_ID_READ(8),
+		VERSION_STRING_READ(9),
+		SET_BANDWIDTH(10),
+		SET_TRANSCEIVER_MODE(11);
 
         private byte mRequestNumber;
 
@@ -556,20 +584,10 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 
 		public String getSerialNumber() {
-			int serial0 = EndianUtils.readSwappedInteger(mData, 8);
-			int serial1 = EndianUtils.readSwappedInteger(mData, 12);
-			int serial2 = EndianUtils.readSwappedInteger(mData, 16);
-			int serial3 = EndianUtils.readSwappedInteger(mData, 20);
 
+			String serialStr = new String(mData, 2, mData.length - 2, Charset.forName("UTF-16LE"));
 			StringBuilder sb = new StringBuilder();
-
-			sb.append(String.format("%08X", serial0));
-			sb.append("-");
-			sb.append(String.format("%08X", serial1));
-			sb.append("-");
-			sb.append(String.format("%08X", serial2));
-			sb.append("-");
-			sb.append(String.format("%08X", serial3));
+			sb.append(serialStr);
 
 			return sb.toString();
 		}
