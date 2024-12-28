@@ -80,7 +80,8 @@ public class BladeRFTunerController extends USBTunerController {
 			mLog.info("Here is the LibUsb device from the getDevice() call: " + getDevice());
 			mLog.info("Here is the device handle from the getDeviceHandle() call: " + getDeviceHandle());
 			mLog.info("Here is the device descriptor from the getDeviceDescriptor() call: \n" + getDeviceDescriptor());
-			mLog.info("Here is the serial number: " + getSerial().getSerialNumber());
+			mLog.info("Here is the serial number: " + getSerial());
+			mLog.info("Here is the firmware version: " + getFirmwareVersion());
 
 			mLog.info("The first step is to do the configuration on the BladeRF... setting receive node, channel, etc");
 			setMode(Mode.RECEIVE);
@@ -112,21 +113,19 @@ public class BladeRFTunerController extends USBTunerController {
 	}
 
 	/**
-	 * BladeRF firmware version string -- is this needed for BladeRF??
+	 * BladeRF firmware version string
 	 */
 	public String getFirmwareVersion() throws UsbException {
-		ByteBuffer buffer = readArray(Request.VERSION_STRING_READ, 0, 0, 255);
-		byte[] data = new byte[255];
-		buffer.get(data);
-		return new String(data);
+		String firmwareVersion = readDescriptor(Descriptors.FIRMWARE_VERSION, 33);
+		return new String(firmwareVersion);
 	}
 
 	/**
-	 * BladeRF part id number and serial number -- this will likely need to be updated bladerf specific
+	 * BladeRF serial number
 	 */
-	public Serial getSerial() throws UsbException {
-		ByteBuffer buffer = readArray(Request.BOARD_PARTID_SERIALNO_READ, 0x0303, 0, 66);
-		return new Serial(buffer);
+	public String getSerial() throws UsbException {
+		String serialNumber = readDescriptor(Descriptors.SERIAL, 33);
+		return new String(serialNumber);
 	}
 
 	/**
@@ -226,6 +225,15 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 
 		return buffer;
+	}
+
+	public String readDescriptor(Descriptors descriptor, int length) throws UsbException {
+		StringBuffer buffer = new StringBuffer(length);
+		int bytesRead = LibUsb.getStringDescriptorAscii(getDeviceHandle(), descriptor.getDescriptorNumber(), buffer);
+		if (bytesRead < 0) {
+			throw new UsbException("Error reading string descriptor: " + LibUsb.errorName(bytesRead));
+		}
+		return buffer.toString().trim();
 	}
 
 	public int read(Request request, int value, int index, int length) throws UsbException {
@@ -338,48 +346,17 @@ public class BladeRFTunerController extends USBTunerController {
 	}
 
     public enum Request {
-        
-		/** The following is HackRF way of doing the operations on the SDR
-		 * Set device to receive mode
-		 * Set Frequency
-		 * Set gain
-		 * etc
-		SET_TRANSCEIVER_MODE(1),
-        MAX2837_TRANSCEIVER_WRITE(2),
-        MAX2837_TRANSCEIVER_READ(3),
-        SI5351C_CLOCK_GENERATOR_WRITE(4),
-        SI5351C_CLOCK_GENERATOR_READ(5),
-        SET_SAMPLE_RATE(6),
-        BASEBAND_FILTER_BANDWIDTH_SET(7),
-        RFFC5071_MIXER_WRITE(8),
-        RFFC5071_MIXER_READ(9),
-        SPIFLASH_ERASE(10),
-        SPIFLASH_WRITE(11),
-        SPIFLASH_READ(12),
-        BOARD_ID_READ(14),
-        VERSION_STRING_READ(15),
-        SET_FREQUENCY(16),
-        AMP_ENABLE(17),
-        BOARD_PARTID_SERIALNO_READ(18),
-        SET_LNA_GAIN(19),
-        SET_VGA_GAIN(20),
-        SET_TXVGA_GAIN(21),
-        ANTENNA_ENABLE(23),
-        SET_FREQUENCY_EXPLICIT(24),
-		SET_CHANNEL(25);
-		*/
-
 		OPEN_BLADERF(1),
 		SET_CHANNEL(2),
 		CHANNEL_CONFIG(3),
-		SET_FREQUENCY(4),
 		SET_SAMPLE_RATE(5),
 		BOARD_PARTID_SERIALNO_READ(6),
 		SET_LNA_GAIN(7), //the below were added so it doesn't break
 		BOARD_ID_READ(8),
 		VERSION_STRING_READ(9),
 		SET_BANDWIDTH(10),
-		SET_TRANSCEIVER_MODE(11);
+		SET_TRANSCEIVER_MODE(11),
+		SET_FREQUENCY(12);
 
         private byte mRequestNumber;
 
@@ -391,6 +368,23 @@ public class BladeRFTunerController extends USBTunerController {
             return mRequestNumber;
         }
     }
+
+	public enum Descriptors {
+		MANUFACTURER(1),
+		PRODUCT(2),
+		SERIAL(3),
+		FIRMWARE_VERSION(4); // firmware_common/bladeRF.h
+
+		private byte mDescriptorNumber;
+
+		Descriptors(int number) {
+			mDescriptorNumber = (byte)number;
+		}
+
+		public byte getDescriptorNumber() {
+			return mDescriptorNumber;
+		}
+	}
 
 	public enum BladeRFrxChannel {
 		RX_CHANNEL_0(0),
@@ -558,38 +552,4 @@ public class BladeRFTunerController extends USBTunerController {
         }
     }
 
-	/**
-	 * BladeRF part id and serial number parsing class
-	 */
-	public class Serial {
-		private byte[] mData;
-
-		public Serial(ByteBuffer buffer) {
-			mData = new byte[buffer.capacity()];
-
-			buffer.get(mData);
-		}
-
-		public String getPartID() {
-			int part0 = EndianUtils.readSwappedInteger(mData, 0);
-			int part1 = EndianUtils.readSwappedInteger(mData, 4);
-
-			StringBuilder sb = new StringBuilder();
-
-			sb.append(String.format("%08X", part0));
-			sb.append("-");
-			sb.append(String.format("%08X", part1));
-
-			return sb.toString();
-		}
-
-		public String getSerialNumber() {
-
-			String serialStr = new String(mData, 2, mData.length - 2, Charset.forName("UTF-16LE"));
-			StringBuilder sb = new StringBuilder();
-			sb.append(serialStr);
-
-			return sb.toString();
-		}
-	}
 }

@@ -255,7 +255,7 @@ public class BladeRFTunerEditor extends TunerEditor<BladeRFTuner,BladeRFTunerCon
         //sb.append(board.getLabel());
         //sb.append("<br>");
 
-        BladeRFTunerController.Serial serial = null;
+        String serial = null;
 
         try
         {
@@ -272,17 +272,12 @@ public class BladeRFTunerEditor extends TunerEditor<BladeRFTuner,BladeRFTunerCon
         if(serial != null)
         {
             sb.append("<b>Serial: </b>");
-            sb.append(serial.getSerialNumber());
-            sb.append("<br>");
-
-            sb.append("<b>Part: </b>");
-            sb.append(serial.getPartID());
+            sb.append(serial);
             sb.append("<br>");
         }
         else
         {
             sb.append("<b>Serial: Unknown</b><br>");
-            sb.append("<b>Part: Unknown</b><br>");
         }
 
         String firmware = null;

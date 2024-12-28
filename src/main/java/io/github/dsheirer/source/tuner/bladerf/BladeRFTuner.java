@@ -28,8 +28,8 @@ public class BladeRFTuner extends Tuner {
 	@Override
 	public String getPreferredName() {
 		try {
-			BladeRFTunerController.Serial serial = getController().getSerial();
-			return "BladeRF " + getController().getTunerType() + " " + serial.getSerialNumber();
+			String serial = getController().getSerial();
+			return "BladeRF " + getController().getTunerType() + " " + serial;
 		}
 		catch(Exception e) {
 			//No - op
@@ -55,7 +55,7 @@ public class BladeRFTuner extends Tuner {
 	@Override
 	public String getUniqueID()	{
 		try {
-			return getTunerClass().toString() + " " + getController().getSerial().getSerialNumber();
+			return getTunerClass().toString() + " " + getController().getSerial();
 		}
 		catch(Exception e) {
 			mLog.error("error getting serial number", e);
