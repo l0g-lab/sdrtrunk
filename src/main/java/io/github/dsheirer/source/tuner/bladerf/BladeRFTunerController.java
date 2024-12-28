@@ -233,7 +233,14 @@ public class BladeRFTunerController extends USBTunerController {
 		if (bytesRead < 0) {
 			throw new UsbException("Error reading string descriptor: " + LibUsb.errorName(bytesRead));
 		}
+		resetDevice(Request.BLADE_USB_CMD_RESET);
 		return buffer.toString().trim();
+	}
+
+	public ByteBuffer resetDevice(Request request) throws UsbException {
+		ByteBuffer buffer = ByteBuffer.allocateDirect(255);
+		int reset = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_HOST_TO_DEVICE, request.getRequestNumber(), (short)0, (short)0, buffer, USB_TIMEOUT_US);
+		return buffer;
 	}
 
 	public int read(Request request, int value, int index, int length) throws UsbException {
@@ -356,7 +363,8 @@ public class BladeRFTunerController extends USBTunerController {
 		VERSION_STRING_READ(9),
 		SET_BANDWIDTH(10),
 		SET_TRANSCEIVER_MODE(11),
-		SET_FREQUENCY(12);
+		SET_FREQUENCY(12),
+		BLADE_USB_CMD_RESET(0x105);
 
         private byte mRequestNumber;
 
