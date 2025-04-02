@@ -17,44 +17,22 @@
  * ****************************************************************************
  */
 
-package io.github.dsheirer.identifier.alias;
-
-import io.github.dsheirer.protocol.Protocol;
+package io.github.dsheirer.edac.bch;
 
 /**
- * Talker alias value provided by the network for the current talker (ie FROM).
+ * BCH(63) decoder base implementation that uses GF(2^6) and standard primitive polynomial.
  */
-public class P25TalkerAliasIdentifier extends TalkerAliasIdentifier
+public abstract class BCH_63 extends BCH
 {
+    public static final int M = 6;
+
     /**
-     * Constructs an instance.
-     * @param value of the talker alias
+     * Constructs an instance
+     * @param k data bits size
+     * @param t error detection and correction capacity of the generator polynomial used to create the codewords.
      */
-    public P25TalkerAliasIdentifier(String value)
+    public BCH_63(int k, int t)
     {
-        super(value);
-    }
-
-    @Override
-    public boolean isValid()
-    {
-        return getValue() != null && !getValue().isEmpty();
-    }
-
-    @Override
-    public Protocol getProtocol()
-    {
-        return Protocol.APCO25;
-    }
-
-    @Override
-    public String toString()
-    {
-        return "TA-" + super.toString();
-    }
-
-    public static P25TalkerAliasIdentifier create(String value)
-    {
-        return new P25TalkerAliasIdentifier(value);
+        super(M, k, t, PRIMITIVE_POLYNOMIAL_GF_63);
     }
 }

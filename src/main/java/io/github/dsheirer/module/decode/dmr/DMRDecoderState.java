@@ -35,6 +35,7 @@ import io.github.dsheirer.identifier.MutableIdentifierCollection;
 import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.identifier.alias.DmrTalkerAliasIdentifier;
 import io.github.dsheirer.identifier.integer.IntegerIdentifier;
+import io.github.dsheirer.identifier.radio.RadioIdentifier;
 import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
 import io.github.dsheirer.log.LoggingSuppressor;
 import io.github.dsheirer.message.EmptyTimeslotPlaceholderMessage;
@@ -101,6 +102,7 @@ import io.github.dsheirer.module.decode.ip.hytera.shortdata.HyteraShortDataPacke
 import io.github.dsheirer.module.decode.ip.hytera.sms.HyteraSmsPacket;
 import io.github.dsheirer.module.decode.ip.mototrbo.ars.ARSPacket;
 import io.github.dsheirer.module.decode.ip.mototrbo.lrrp.LRRPPacket;
+import io.github.dsheirer.module.decode.ip.mototrbo.tms.TMSPacket;
 import io.github.dsheirer.module.decode.ip.mototrbo.xcmp.XCMPPacket;
 import io.github.dsheirer.protocol.Protocol;
 import io.github.dsheirer.source.tuner.channel.rotation.AddChannelRotationActiveStateRequest;
@@ -149,9 +151,9 @@ public class DMRDecoderState extends TimeslotDecoderState
         }
 
         //For RAS protected systems, allows user to ignore CRC checksums and still decode the system
-        if(channel.getDecodeConfiguration() instanceof DecodeConfigDMR)
+        if(channel.getDecodeConfiguration() instanceof DecodeConfigDMR config)
         {
-            mIgnoreCRCChecksums = ((DecodeConfigDMR)channel.getDecodeConfiguration()).getIgnoreCRCChecksums();
+            mIgnoreCRCChecksums = config.getIgnoreCRCChecksums();
         }
     }
 
@@ -353,7 +355,7 @@ public class DMRDecoderState extends TimeslotDecoderState
         //Only respond if this is a standard/control channel (not a traffic channel).
         if(mChannel.isStandardChannel() && getCurrentFrequency() > 0 &&
             restChannel.getDownlinkFrequency() > 0 &&
-            restChannel.getDownlinkFrequency() != getCurrentFrequency() && mTrafficChannelManager != null)
+            restChannel.getDownlinkFrequency() != getCurrentFrequency() && hasTrafficChannelManager())
         {
             mTrafficChannelManager.convertToTrafficChannel(mChannel, getCurrentFrequency(), restChannel,
                 mNetworkConfigurationMonitor);
@@ -500,6 +502,19 @@ public class DMRDecoderState extends TimeslotDecoderState
                     .identifiers(mic)
                     .timeslot(getTimeslot())
                     .details(lrrp.toString())
+                    .build();
+            broadcast(shortDataEvent);
+        }
+        //Motorola TMS
+        else if(packet.getPacket() instanceof TMSPacket tms)
+        {
+            MutableIdentifierCollection mic = new MutableIdentifierCollection(packet.getIdentifiers());
+
+            DecodeEvent shortDataEvent = DMRDecodeEvent.builder(DecodeEventType.TEXT_MESSAGE, packet.getTimestamp())
+                    .channel(getCurrentChannel())
+                    .identifiers(mic)
+                    .timeslot(getTimeslot())
+                    .details(tms.toString())
                     .build();
             broadcast(shortDataEvent);
         }
@@ -843,7 +858,10 @@ public class DMRDecoderState extends TimeslotDecoderState
 
                     //Channel rotation monitor normally uses only CONTROL state, so when we detect that we're a
                     //Capacity plus system, add ACTIVE as an active state to the monitor.  This can be requested repeatedly.
-                    getInterModuleEventBus().post(CAPACITY_PLUS_ACTIVE_STATE_REQUEST);
+                    if(getInterModuleEventBus() != null)
+                    {
+                        getInterModuleEventBus().post(CAPACITY_PLUS_ACTIVE_STATE_REQUEST);
+                    }
 
                     broadcast(new DecoderStateEvent(this, Event.CONTINUATION, State.ACTIVE, getTimeslot()));
 
@@ -1189,6 +1207,13 @@ public class DMRDecoderState extends TimeslotDecoderState
                         DmrTalkerAliasIdentifier updated = DmrTalkerAliasIdentifier
                                 .create(alias.getTalkerAliasIdentifier().getValue() + talkerAlias.getValue());
                         getIdentifierCollection().update(updated);
+
+                        Identifier fromRadio = getIdentifierCollection().getFromIdentifier();
+
+                        if(hasTrafficChannelManager() && fromRadio instanceof RadioIdentifier radio)
+                        {
+                            mTrafficChannelManager.getTalkerAliasManager().update(radio, updated);
+                        }
                     }
                     else
                     {
@@ -1215,6 +1240,13 @@ public class DMRDecoderState extends TimeslotDecoderState
                         DmrTalkerAliasIdentifier updated = DmrTalkerAliasIdentifier.create(talkerAlias.getValue() +
                                 alias.getTalkerAliasIdentifier().getValue());
                         getIdentifierCollection().update(updated);
+
+                        Identifier fromRadio = getIdentifierCollection().getFromIdentifier();
+
+                        if(hasTrafficChannelManager() && fromRadio instanceof RadioIdentifier radio)
+                        {
+                            mTrafficChannelManager.getTalkerAliasManager().update(radio, updated);
+                        }
                     }
                     else
                     {
@@ -1229,21 +1261,22 @@ public class DMRDecoderState extends TimeslotDecoderState
                 }
                 break;
             case FULL_CAPACITY_PLUS_WIDE_AREA_VOICE_CHANNEL_USER:
-                if(message instanceof CapacityPlusWideAreaVoiceChannelUser)
+                if(message instanceof CapacityPlusWideAreaVoiceChannelUser cpwavcu)
                 {
-                    CapacityPlusWideAreaVoiceChannelUser cpuo4 = (CapacityPlusWideAreaVoiceChannelUser)message;
-
-                    updateRestChannel(cpuo4.getRestChannel());
+                    updateRestChannel(cpwavcu.getRestChannel());
 
                     if(isTerminator)
                     {
                         closeCurrentCallEvent(message.getTimestamp());
                         getIdentifierCollection().remove(Role.FROM);
-                        getIdentifierCollection().update(cpuo4.getTalkgroup());
+                        getIdentifierCollection().update(cpwavcu.getTalkgroup());
                     }
                     else
                     {
                         getIdentifierCollection().update(message.getIdentifiers());
+                        ServiceOptions serviceOptions = cpwavcu.getServiceOptions();
+                        updateCurrentCall(serviceOptions.isEncrypted() ? DecodeEventType.CALL_GROUP_ENCRYPTED :
+                                DecodeEventType.CALL_GROUP, serviceOptions.toString(), message.getTimestamp());
                     }
                 }
                 break;
@@ -1474,10 +1507,13 @@ public class DMRDecoderState extends TimeslotDecoderState
         {
             if(networkAdded)
             {
-                sb.append("\n\n");
+                sb.append("\n");
             }
 
-            sb.append(mTrafficChannelManager.getTalkerAliasManager().getAliasSummary());
+            if(hasTrafficChannelManager())
+            {
+                sb.append(mTrafficChannelManager.getTalkerAliasManager().getAliasSummary());
+            }
         }
 
         return sb.toString();
