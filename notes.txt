@@ -1,0 +1,101 @@
+SDRTrunk Notes -- libbladeRF
+
+This should help me to break down how the blade_rf is opened, configured, etc.
+
+1. Open blade_rf device via libusb -- bladerf_open()
+	> this is already taken care of by sdrtrunk libusb methods
+
+2. Configure bladeRF device. This must be done before RXing samples. This is done on a per channel basis (RX0 in our case)
+	1. Frequency
+	2. Gain
+	3. Sample Rate
+	4. Bandwidth
+
+	BladeRF channels are specified by BLADEF_CHANNEL_RX(0) macro
+
+
+	Gain Configuration: 5dB - 66dB (for RX)
+		bladerf_get_gain_range() gets the range of gain values for specified channel
+		
+	    status = bladerf_set_gain(dev, c->channel, c->gain);
+
+
+	Frequency Configuration: 237500000 to 3800000000 Hz
+		status = bladerf_set_frequency(dev, c->channel, c->frequency);
+
+	Sample Rate Configuration: 80000 to 40000000 Hz
+		status = bladerf_set_sample_rate(dev, c->channel, c->samplerate, NULL);
+
+
+	Bandwidth Configuration: 1500000 to 28000000 Hz
+		*Note* the sample rate should generally be 2 x bandwidth configured
+
+	    status = bladerf_set_bandwidth(dev, c->channel, c->bandwidth, NULL);
+	
+
+
+The below is what figures out the address to write to... it could be used for frequency, gain, bandwidth, etc.
+It should contain the address of the memory register on the AD9361 RF board.
+
+bitwise math (can possibly done by Java itself) to calculate the address of the register to write to:
+#define RFIC_ADDRESS(cmd, ch) ((cmd & 0xFF) + ((ch & 0xF) << 8))
+Above referenced here: https://github.com/Nuand/bladeRF/blob/master/host/libraries/libbladeRF/src/board/bladerf2/rfic_fpga.c#L82
+
+(cmd & 0xFF)		-> takes lower 8 bits of cmd variable
+						0xFF mask for all 8 bits set to 1
+						bitwise AND with 0xFF keeps only least significant byte of cmd
+
+(ch & 0xF)			-> takes lower 4 bits of ch variable
+						0xF mask for lower 4 bits set to 1
+						bitwise AND with 0xF keeps only least significant niffle (4 bits) and 0 out upper bits
+
+((ch & 0xF) << 8)	-> shifts above lower 4 bits left by 8 positions
+						essentially moves 4 bits into high byte of the result
+
+((cmd & 0xFF) + ((ch & 0xF) << 8)) ->	above is added together... first part is lower 8 bits of cmd
+																	second part is the shifted 4 bits of ch (now in the 9-12 bit positions)
+
+
+
+Some cmds:	https://github.com/Nuand/bladeRF/blob/master/firmware_common/bladeRF.h
+			https://github.com/Nuand/bladeRF/blob/master/fpga_common/include/bladerf2_common.h
+
+
+NIOS Packet Definitions: https://github.com/Nuand/bladeRF/tree/master/fpga_common/include
+
+
+
+------------------------------------------------------------------------------------------
+static int _rfic_cmd_read(struct bladerf *dev,
+                          bladerf_channel ch,
+                          bladerf_rfic_command cmd,
+                          uint64_t *data);
+
+static int _rfic_cmd_read(struct bladerf *dev,
+                          bladerf_channel ch,
+                          bladerf_rfic_command cmd,
+                          uint64_t *data)
+{
+    return dev->backend->rfic_command_read(dev, RFIC_ADDRESS(cmd, ch), data);
+}
+------------------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------------------
+static int _rfic_cmd_write(struct bladerf *dev,
+                           bladerf_channel ch,
+                           bladerf_rfic_command cmd,
+                           uint64_t data);
+
+static int _rfic_cmd_write(struct bladerf *dev,
+                           bladerf_channel ch,
+                           bladerf_rfic_command cmd,
+                           uint64_t data)
+{
+    /* Perform the write command. */
+    CHECK_STATUS(
+        dev->backend->rfic_command_write(dev, RFIC_ADDRESS(cmd, ch), data));
+
+    /* Block until the job has been completed. */
+    return _rfic_fpga_spinwait(dev);
+}
+------------------------------------------------------------------------------------------

@@ -29,6 +29,13 @@ public class BladeRFTunerController extends USBTunerController {
     //public static final byte REQUEST_TYPE_OUT = (byte)(LibUsb.ENDPOINT_OUT | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
     public static final byte REQUEST_HOST_TO_DEVICE = (byte)0x00; // LibUsb.ENDPOINT_OUT
     public static final byte REQUEST_DEVICE_TO_HOST = (byte)0x80; // LibUsb.ENDPOINT_IN
+	public static final int PERIPHERAL_TIMEOUT = 250;
+	public static final long CTRL_TIMEOUT_MS = 1000l;
+	public static final long BULK_TIMEOUT_MS = 1000l;
+	public static final long USB_MSG_SIZE_SS = 2048l;
+	public static final long USB_MSG_SIZE_HS = 1024l;
+	public static final int GAIN_MIN = 5;
+	public static final int GAIN_MAX = 66;
     public static final long MINIMUM_TUNABLE_FREQUENCY_HZ = 47000000l; // 47MHz
     public static final long MAXIMUM_TUNABLE_FREQUENCY_HZ = 6000000000l; // 6GHz
     public static final long DEFAULT_FREQUENCY = 101100000; // 101.1MHz
@@ -83,10 +90,11 @@ public class BladeRFTunerController extends USBTunerController {
 			mLog.info("Here is the serial number: " + getSerial());
 			mLog.info("Here is the firmware version: " + getFirmwareVersion());
 
-			mLog.info("The first step is to do the configuration on the BladeRF... setting receive node, channel, etc");
-			setMode(Mode.RECEIVE);
+			mLog.info("The first step is to do the configuration on the BladeRF... setting receive mode, channel, etc");
+			//setMode(Mode.RECEIVE);
+			//setMode(Mode.ENABLE);
 			mLog.info("This is second step");
-			setFrequency(DEFAULT_FREQUENCY);
+			//setFrequency(DEFAULT_FREQUENCY);
 		}
 		catch(Exception e) {
 			mLog.error("Error on BladeRF startup", e);
@@ -107,16 +115,11 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 	}
 
-	public BoardID getBoardID() throws UsbException {
-		int id = readByte(Request.BOARD_ID_READ, (byte)0, (byte)0, false);
-		return BoardID.fromValue(id);
-	}
-
 	/**
 	 * BladeRF firmware version string
 	 */
 	public String getFirmwareVersion() throws UsbException {
-		String firmwareVersion = readDescriptor(Descriptors.FIRMWARE_VERSION, 33);
+		String firmwareVersion = readDescriptor(BladeUSBStringDescriptors.BLADE_USB_STR_INDEX_FW_VER, 33);
 		return new String(firmwareVersion);
 	}
 
@@ -124,7 +127,7 @@ public class BladeRFTunerController extends USBTunerController {
 	 * BladeRF serial number
 	 */
 	public String getSerial() throws UsbException {
-		String serialNumber = readDescriptor(Descriptors.SERIAL, 33);
+		String serialNumber = readDescriptor(BladeUSBStringDescriptors.BLADE_USB_STR_INDEX_SERIAL, 33);
 		return new String(serialNumber);
 	}
 
@@ -182,6 +185,12 @@ public class BladeRFTunerController extends USBTunerController {
 			}
 	}
 
+	//@Override
+	public void setTunedFrequency1(long frequency) throws SourceException {
+		int addr = getRFICAddress(0x04, 0x01);
+		
+	}
+
 	@Override
 	public double getCurrentSampleRate() {
 		return mSampleRate.getRate();
@@ -214,6 +223,11 @@ public class BladeRFTunerController extends USBTunerController {
         }
     }
 
+	public static int getRFICAddress(int cmd, int ch) {
+		int address = (cmd & 0xFF) + ((ch & 0xF) << 8);
+		return address;
+	}
+
 	public ByteBuffer readArray(Request request, int value, int index, int length) throws UsbException {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(length);
 
@@ -227,19 +241,18 @@ public class BladeRFTunerController extends USBTunerController {
 		return buffer;
 	}
 
-	public String readDescriptor(Descriptors descriptor, int length) throws UsbException {
+	public String readDescriptor(BladeUSBStringDescriptors descriptor, int length) throws UsbException {
 		StringBuffer buffer = new StringBuffer(length);
-		int bytesRead = LibUsb.getStringDescriptorAscii(getDeviceHandle(), descriptor.getDescriptorNumber(), buffer);
+		int bytesRead = LibUsb.getStringDescriptorAscii(getDeviceHandle(), descriptor.getRequestNumber(), buffer);
 		if (bytesRead < 0) {
 			throw new UsbException("Error reading string descriptor: " + LibUsb.errorName(bytesRead));
 		}
-		resetDevice(Request.BLADE_USB_CMD_RESET);
 		return buffer.toString().trim();
 	}
 
 	public ByteBuffer resetDevice(Request request) throws UsbException {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(255);
-		int reset = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_HOST_TO_DEVICE, request.getRequestNumber(), (short)0, (short)0, buffer, USB_TIMEOUT_US);
+		int reset = LibUsb.controlTransfer(getDeviceHandle(), REQUEST_HOST_TO_DEVICE, Request.BLADE_USB_CMD_RESET.getRequestNumber(), (short)0, (short)0, buffer, USB_TIMEOUT_US);
 		return buffer;
 	}
 
@@ -323,53 +336,117 @@ public class BladeRFTunerController extends USBTunerController {
         return mSampleRate.getRate();
     }
 
-	public enum BoardID {
-		BLADERF(0, "BladeRF"),
-		UNKNOWN(-1, "Unknown");
+	public enum BladeUSBBackend {
+		SAMPLE_EP_IN((byte) 0x81),
+		SAMPLE_EP_OUT((byte) 0x01),
+		PERIPHERAL_EP_IN((byte) 0x82),
+		PERIPHERAL_EP_OUT((byte) 0x02);
 
-		private int mValue;
-		private String mLabel;
+		private byte mRequestNumber;
 
-		BoardID(int value, String label) {
-			mValue = value;
-			mLabel = label;
+		BladeUSBBackend(byte number) {
+			mRequestNumber = number;
 		}
 
-		public int getValue() {
-			return mValue;
-		}
-
-		public String getLabel() {
-			return mLabel;
-		}
-
-		public static BoardID fromValue(int value) {
-			if(value == 0) {
-				return BLADERF;
-			}
-
-			return UNKNOWN;
+		public byte getRequestNumber() {
+			return mRequestNumber;
 		}
 	}
 
-    public enum Request {
-		OPEN_BLADERF(1),
-		SET_CHANNEL(2),
-		CHANNEL_CONFIG(3),
-		SET_SAMPLE_RATE(5),
-		BOARD_PARTID_SERIALNO_READ(6),
-		SET_LNA_GAIN(7), //the below were added so it doesn't break
-		BOARD_ID_READ(8),
-		VERSION_STRING_READ(9),
-		SET_BANDWIDTH(10),
-		SET_TRANSCEIVER_MODE(11),
-		SET_FREQUENCY(12),
-		BLADE_USB_CMD_RESET(0x105);
+	public enum BladeUSBStringDescriptors {
+		BLADE_USB_STR_INDEX_MFR((byte) 0x01),
+		BLADE_USB_STR_INDEX_PRODUCT((byte) 0x02),
+		BLADE_USB_STR_INDEX_SERIAL((byte) 0x03),
+		BLADE_USB_STR_INDEX_FW_VER((byte) 0x04);
+
+		private byte mRequestNumber;
+
+		BladeUSBStringDescriptors(byte number) {
+			mRequestNumber = number;
+		}
+
+		public byte getRequestNumber() {
+			return mRequestNumber;
+		}
+	}
+
+    public enum BladeUSBRequest {
+		BLADE_USB_CMD_QUERY_VERSION((byte) 0x00),
+		BLADE_USB_CMD_QUERY_FPGA_STATUS((byte) 0x01),
+		BLADE_USB_CMD_BEGIN_PROG((byte) 0x02),
+		BLADE_USB_CMD_END_PROG((byte) 0x03),
+		BLADE_USB_CMD_RF_RX((byte) 0x04),
+		BLADE_USB_CMD_RF_TX((byte) 0x05),
+		BLADE_USB_CMD_QUERY_DEVICE_READY((byte) 0x06),
+		BLADE_USB_CMD_QUERY_FLASH_ID((byte) 0x07),
+		BLADE_USB_CMD_QUERY_FPGA_SOURCE((byte) 0x08),
+		BLADE_USB_CMD_FLASH_READ((byte) 0x100),
+		BLADE_USB_CMD_READ_OTP((byte) 0x103),
+		BLADE_USB_CMD_WRITE_OTP((byte) 0x104),
+		BLADE_USB_CMD_RESET((byte) 0x105),
+		BLADE_USB_CMD_JUMP_TO_BOOTLOADER((byte) 0x106),
+		BLADE_USB_CMD_READ_PAGE_BUFFER((byte) 0x107),
+		BLADE_USB_CMD_WRITE_PAGE_BUFFER((byte) 0x108),
+		BLADE_USB_CMD_LOCK_OTP((byte) 0x109),
+		BLADE_USB_CMD_READ_CAL_CACHE((byte) 0x110),
+		BLADE_USB_CMD_INVALIDATE_CAL_CACHE((byte) 0x111),
+		BLADE_USB_CMD_REFRESH_CAL_CACHE((byte) 0x112),
+		BLADE_USB_CMD_SET_LOOPBACK((byte) 0x113),
+		BLADE_USB_CMD_GET_LOOPBACK((byte) 0x114),
+		BLADE_USB_CMD_READ_LOG_ENTRY((byte) 0x115);
+
+		private byte mRequestNumber;
+
+		BladeUSBRequest(byte number) {
+			mRequestNumber = number;
+		}
+
+		public byte getRequestNumber() {
+			return mRequestNumber;
+		}
+	}
+
+	public enum BladeRFICCommand {
+		BLADERF_RFIC_COMMAND_STATUS((byte) 0x00), // query the status register (read)
+		BLADERF_RFIC_COMMAND_INIT((byte) 0x01), // initalized RFIC (read/write)
+		BLADERF_RFIC_COMMAND_ENABLE((byte) 0x02), // enable or disable a channel (read/write)
+		BLADERF_RFIC_COMMAND_SAMPLERATE((byte) 0x03), // sample rate for channel (read/write)
+		BLADERF_RFIC_COMMAND_FREQUENCY((byte) 0x04), // center freq for channel (read/write)
+		BLADERF_RFIC_COMMAND_BANDWIDTH((byte) 0x05), // bandwidth for channel (read/write)
+		BLADERF_RFIC_COMMAND_GAINMODE((byte) 0x06), // gain mode for channel (read/write)
+		BLADERF_RFIC_COMMAND_GAIN((byte) 0x07), // overall gain for channel (read/write)
+		BLADERF_RFIC_COMMAND_RSSI((byte) 0x08), // RSSI for channel (read)
+		BLADERF_RFIC_COMMAND_FILTER((byte) 0x09), // FIR filter for channel (read/write)
+		BLADERF_RFIC_COMMAND_TXMUTE((byte) 0x0A); // TX Mute for channel (write)
+
+		private byte mRequestNumber;
+
+		BladeRFICCommand(byte number) {
+			mRequestNumber = number;
+		}
+
+		public byte getRequestNumber() {
+			return mRequestNumber;
+		}
+	}
+
+	public enum Request {
+		OPEN_BLADERF((byte) 0x01),
+		SET_CHANNEL((byte) 0x02),
+		CHANNEL_CONFIG((byte) 0x03),
+		SET_SAMPLE_RATE((byte) 0x05),
+		BOARD_PARTID_SERIALNO_READ((byte) 0x06),
+		SET_LNA_GAIN((byte) 0x07), //the below were added so it doesn't break
+		VERSION_STRING_READ((byte) 0x09),
+		SET_BANDWIDTH((byte) 0x10),
+		SET_TRANSCEIVER_MODE((byte) 0x11),
+		SET_FREQUENCY((byte) 0x12),
+		BLADE_USB_CMD_RESET((byte) 0x105);
 
         private byte mRequestNumber;
 
-        Request(int number) {
-            mRequestNumber = (byte)number;
+        Request(byte number) {
+            mRequestNumber = number;
         }
 
         public byte getRequestNumber() {
@@ -377,31 +454,14 @@ public class BladeRFTunerController extends USBTunerController {
         }
     }
 
-	public enum Descriptors {
-		MANUFACTURER(1),
-		PRODUCT(2),
-		SERIAL(3),
-		FIRMWARE_VERSION(4); // firmware_common/bladeRF.h
-
-		private byte mDescriptorNumber;
-
-		Descriptors(int number) {
-			mDescriptorNumber = (byte)number;
-		}
-
-		public byte getDescriptorNumber() {
-			return mDescriptorNumber;
-		}
-	}
-
 	public enum BladeRFrxChannel {
-		RX_CHANNEL_0(0),
-		RX_CHANNEL_1(1);
+		RX_CHANNEL_0((byte) 0x00),
+		RX_CHANNEL_1((byte) 0x01);
 
 		private byte mChannel;
 
-		BladeRFrxChannel(int number) {
-			mChannel = (byte)number;
+		BladeRFrxChannel(byte number) {
+			mChannel = number;
 		}
 
 		public byte getNumber() {
@@ -504,16 +564,16 @@ public class BladeRFTunerController extends USBTunerController {
 	}
 
 	public enum Mode {
-		OFF(0, "Off"),
-		RECEIVE(1, "Receive"),
-		TRANSMIT(2, "Transmit"),
-		SS(33, "SS");
+		OFF((byte) 0x00, "Off"),
+		RECEIVE((byte) 0x01, "Receive"),
+		TRANSMIT((byte) 0x02, "Transmit"),
+		SS((byte) 0x33, "SS");
 
 		private byte mNumber;
 		private String mLabel;
 
-		Mode(int number, String label) {
-			mNumber = (byte)number;
+		Mode(byte number, String label) {
+			mNumber = number;
 			mLabel = label;
 		}
 

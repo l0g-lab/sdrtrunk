@@ -225,83 +225,54 @@ public class BladeRFTunerEditor extends TunerEditor<BladeRFTuner,BladeRFTunerCon
     }
 
     @Override
-    public void setTunerLockState(boolean locked)
-    {
+    public void setTunerLockState(boolean locked) {
         getFrequencyPanel().updateControls();
         getSampleRateCombo().setEnabled(!locked);
         updateSampleRateToolTip();
     }
 
-    private String getTunerInfo()
-    {
-        //BladeRFTunerController.BoardID board = BladeRFTunerController.BoardID.UNKNOWN;
-
-        //try
-        //{
-        //    if(hasTuner())
-        //    {
-        //        board = getTuner().getController().getBoardID();
-        //    }
-        //}
-        //catch(UsbException e)
-        //{
-        //    mLog.error("couldn't read HackRF board identifier", e);
-        //}
-
+    private String getTunerInfo() {
         StringBuilder sb = new StringBuilder();
 
-        //sb.append("<html><h3>BladeRF Tuner</h3>");
-        //sb.append("<b>Board: </b>");
-        //sb.append(board.getLabel());
-        //sb.append("<br>");
+        sb.append("<html><h3>BladeRF Tuner</h3>");
 
         String serial = null;
 
-        try
-        {
-            if(hasTuner())
-            {
+        try {
+            if(hasTuner()) {
                 serial = getTuner().getController().getSerial();
             }
         }
-        catch(Exception e)
-        {
+        catch(Exception e) {
             mLog.error("couldn't read BladeRF serial number", e);
         }
 
-        if(serial != null)
-        {
+        if(serial != null) {
             sb.append("<b>Serial: </b>");
             sb.append(serial);
             sb.append("<br>");
         }
-        else
-        {
+        else {
             sb.append("<b>Serial: Unknown</b><br>");
         }
 
         String firmware = null;
 
-        try
-        {
-            if(hasTuner())
-            {
+        try {
+            if(hasTuner()) {
                 firmware = getTuner().getController().getFirmwareVersion();
             }
         }
-        catch(Exception e)
-        {
+        catch(Exception e) {
             mLog.error("couldn't read BladeRF firmware version", e);
         }
 
-        if(firmware != null)
-        {
+        if(firmware != null) {
             sb.append("<b>Firmware: </b>");
             sb.append(firmware);
             sb.append("<br>");
         }
-        else
-        {
+        else {
             sb.append("<b>Firmware: Unknown</b><br>");
         }
 

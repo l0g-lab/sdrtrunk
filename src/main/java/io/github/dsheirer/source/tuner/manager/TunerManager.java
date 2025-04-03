@@ -122,7 +122,7 @@ public class TunerManager implements IDiscoveredTunerStatusListener
             if(status == LibUsb.SUCCESS)
             {
                 mLibUsbInitialized = true;
-//            LibUsb.setOption(mLibUsbApplicationContext, LibUsb.OPTION_LOG_LEVEL, LibUsb.LOG_LEVEL_DEBUG);
+                //LibUsb.setOption(mLibUsbApplicationContext, LibUsb.OPTION_LOG_LEVEL, LibUsb.LOG_LEVEL_DEBUG);
                 discoverUSBTuners();
             }
         }
@@ -214,6 +214,7 @@ public class TunerManager implements IDiscoveredTunerStatusListener
                                     ChannelizerType channelizerType = mUserPreferences.getTunerPreference().getChannelizerType();
                                     DiscoveredUSBTuner discoveredUSBTuner = new DiscoveredUSBTuner(tunerClass, bus,
                                             portAddress, channelizerType);
+                                    mLog.info("================== This tuner that has been discovered is being added to the discoveredUSBTuner class file ========================");
                                     discoveredUSBTuners.add(discoveredUSBTuner);
                                 }
                             }
