@@ -47,7 +47,7 @@ Above referenced here: https://github.com/Nuand/bladeRF/blob/master/host/librari
 
 (ch & 0xF)			-> takes lower 4 bits of ch variable
 						0xF mask for lower 4 bits set to 1
-						bitwise AND with 0xF keeps only least significant niffle (4 bits) and 0 out upper bits
+						bitwise AND with 0xF keeps only least significant nibble (4 bits) and 0 out upper bits
 
 ((ch & 0xF) << 8)	-> shifts above lower 4 bits left by 8 positions
 						essentially moves 4 bits into high byte of the result
