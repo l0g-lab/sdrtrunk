@@ -7,6 +7,8 @@ import io.github.dsheirer.source.tuner.ITunerErrorListener;
 import io.github.dsheirer.source.tuner.TunerType;
 import io.github.dsheirer.source.tuner.configuration.TunerConfiguration;
 import io.github.dsheirer.source.tuner.usb.USBTunerController;
+import io.github.dsheirer.source.tuner.bladerf.BladeRFNIOS;
+import io.github.dsheirer.source.tuner.bladerf.BladeRFControlRFFE;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
@@ -25,8 +27,6 @@ public class BladeRFTunerController extends USBTunerController {
 
 	public final static long USB_TIMEOUT_US = 1000000L; //uSeconds - 1000ms
 	public static final int USB_TRANSFER_BUFFER_SIZE = 262144; // not sure yet
-    //public static final byte REQUEST_TYPE_IN = (byte)(LibUsb.ENDPOINT_IN | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
-    //public static final byte REQUEST_TYPE_OUT = (byte)(LibUsb.ENDPOINT_OUT | LibUsb.REQUEST_TYPE_VENDOR | LibUsb.RECIPIENT_DEVICE);
     public static final byte REQUEST_HOST_TO_DEVICE = (byte)0x00; // LibUsb.ENDPOINT_OUT
     public static final byte REQUEST_DEVICE_TO_HOST = (byte)0x80; // LibUsb.ENDPOINT_IN
 	public static final int PERIPHERAL_TIMEOUT = 250;
@@ -41,10 +41,6 @@ public class BladeRFTunerController extends USBTunerController {
     public static final long DEFAULT_FREQUENCY = 101100000; // 101.1MHz
     public static final double USABLE_BANDWIDTH = 0.90;
     public static final int DC_HALF_BANDWIDTH = 5000;
-	public static final int NIOS_PKT_LEN = 16;
-	public static final int RFFE_CONTROL_SPDT_MASK = 0x3;
-	public static final int RFFE_CONTROL_RX_SPDT_1 = 6;
-    public static final int RFFE_CONTROL_RX_SPDT_2 = 8;
 
     private INativeBufferFactory mNativeBufferFactory = new SignedByteNativeBufferFactory();
     private BladeRFSampleRate mSampleRate = BladeRFSampleRate.RATE_5_0;
@@ -88,15 +84,14 @@ public class BladeRFTunerController extends USBTunerController {
 	protected void deviceStart() throws SourceException {
 		try {
 			mLog.info("============= This is BladeRFTunerController which extends the USBTunerController... USBTunerController calls the deviceStart() function ==============");
-			mLog.info("Here is the LibUsb device from the getDevice() call: " + getDevice());
-			mLog.info("Here is the device handle from the getDeviceHandle() call: " + getDeviceHandle());
-			mLog.info("Here is the device descriptor from the getDeviceDescriptor() call: \n" + getDeviceDescriptor());
-			mLog.info("Here is the serial number: " + getSerial());
-			mLog.info("Here is the firmware version: " + getFirmwareVersion());
+			mLog.info("Here is the LibUsb device from the getDevice() call: {}", getDevice());
+			mLog.info("Here is the device handle from the getDeviceHandle() call: {}", getDeviceHandle());
+			mLog.info("Here is the device descriptor from the getDeviceDescriptor() call: \n {}", getDeviceDescriptor());
+			mLog.info("Here is the serial number: {}", getSerial());
+			mLog.info("Here is the firmware version: {}", getFirmwareVersion());
 
 			mLog.info("The first step is to do the configuration on the BladeRF... setting receive mode, channel, etc");
-			//setMode(Mode.RECEIVE);
-			//setMode(Mode.ENABLE);
+			// initialize BladeRF
 			mLog.info("This is second step");
 			//setFrequency(DEFAULT_FREQUENCY);
 		}
@@ -111,11 +106,7 @@ public class BladeRFTunerController extends USBTunerController {
 	 */
 	@Override
 	protected void deviceStop() {
-		try {
-			setMode(Mode.OFF); // does this work for BladeRF??
-		} catch(UsbException ue) {
-			mLog.error("Error while settings BladeRF mode to OFF", ue);
-		}
+		mLog.info("Setting mode to off");
 	}
 
 	/**
@@ -147,129 +138,46 @@ public class BladeRFTunerController extends USBTunerController {
 	}
 
 	/**
-	 * Sets the BladeRF transciever mode -- this will likely need to be updated, bladerf specific
-	 */
-	public void setMode(Mode mode) throws UsbException {
-		write(Request.SET_TRANSCEIVER_MODE, mode.getNumber(), 0);
-	}
-
-	/**
 	 * Sets the BladeRF RX Channel
 	 */
 	public void setChannel(BladeRFrxChannel channel) throws UsbException {
 		write(Request.SET_CHANNEL, channel.getNumber(), 0);
 	}
 
-	public final class Nios8x32Packet {
-		private static final byte MAGIC			 = (byte) 'C';
+	// /**
+	//  * Select band based on frequency
+	//  */
+	// public void rfic_host_select_band(BladeRFrxChannel ch, long freq) throws SourceException {
+	// 	long reg;
+	// 	// read RFFE control register
+	// 	// CHECK_STATUS(nios_rffe_control_read(reg));
 
-		// Request packet indices
-		private static final int IDX_MAGIC       = 0;
-		private static final int IDX_TARGET_ID   = 1;
-		private static final int IDX_FLAGS       = 2;
-		private static final int IDX_RESV1       = 3;
-		private static final int IDX_ADDR        = 4;
-		private static final int IDX_DATA        = 5;
-		private static final int IDX_RESV2       = 9;
+	// 	// Modify SPDT bits - have to do this for all channels sharing the same LO
+	// 	int i;
+	// 	//for (i=0; i<2; ++i) {
+	// 		// CHECK_STATUS(modifySpdtBitsByFreq(reg, i, freq))
+	// 	//}
+	// }
 
-		// Target IDs
-		private static final byte TARGET_VERSION  = (byte) 0x00;   // FPGA version (read only)
-		private static final byte TARGET_CONTROL  = (byte) 0x01;  // FPGA control/config register
-		private static final byte TARGET_ADF4351  = (byte) 0x02;   // XB-200 ADF4351 register access (write-only)
-		private static final byte TARGET_RFFE_CSR = (byte) 0x03;   // RFFE control & status GPIO
-		private static final byte TARGET_ADF400X  = (byte) 0x04;   // ADF400x config
-		private static final byte TARGET_FASTLOCK = (byte) 0x05;   // Save AD9361 fast lock profile to Nios
-					
-		// IDs 0x80 through 0xff will not be assigned by Nuand. These are reserved for user customizations
-		private static final byte TARGET_USR1     = (byte) 0x80;
-		private static final byte TARGET_USR128   = (byte) 0xff;
+	// public void rfic_host_initialize() throws SourceException {
+	// 	mLog.info("Initializing BladeRF in Host Mode");
+	// 	BladeRFNIOS packet;
 
-		// Flag bits
-		private static final int FLAG_WRITE      = (1 << 0);
-		private static final int FLAG_SUCCESS    = (1 << 1);
+	// 	int rffe_control_enable = BladeRFFEControl.RFFE_CONTROL_ENABLE.getRequestNumber();
+	// 	int rffe_control_txnrx = BladeRFFEControl.RFFE_CONTROL_TXNRX.getRequestNumber();
 
-		private Nios8x32Packet() {
+	// 	packet.nios_rffe_control_write((1 << rffe_control_enable) | (1 << rffe_control_txnrx));
+	// }
 
-		}
-	}
+	// //public void print_buf(ByteBuffer buf) throws SourceException {
+	// //	try {
+	// //		String msg = new String(buf.array(), "UTF-8");
+	// //		mLog.info("Buffer Content: " + msg);
+	// //	} catch (SourceException e) {
+	// //		mLog.error("Cannot print buffer", e);
+	// //	}
 
-	/**
-	 * Select band based on frequency
-	 */
-	public void rfic_host_select_band(BladeRFrxChannel ch, long freq) throws SourceException {
-		long reg;
-		// read RFFE control register
-		// CHECK_STATUS(nios_rffe_control_read(reg));
-
-		// Modify SPDT bits - have to do this for all channels sharing the same LO
-		int i;
-		//for (i=0; i<2; ++i) {
-			// CHECK_STATUS(modifySpdtBitsByFreq(reg, i, freq))
-		//}
-	}
-
-	//public void print_buf(ByteBuffer buf) throws SourceException {
-	//	String msg = StandardCharsets.UTF_8.decode(buf).toString();
-	//	if (msg == null) {
-	//		mLog.info("Nothing in buffer");
-	//	}
-
-	//	mLog.info("Buffer Content: " + msg);
-	//}
-
-	public void nios_access(ByteBuffer buf) throws SourceException {
-		int status;
-
-		//print_buf(buf);
-	}
-
-	public void nios_rffe_control_read(long reg) throws SourceException {
-		try {
-			nios_8x32_read(BladeNiosPKT.NIOS_PKT_8x32_TARGET_RFFE_CSR, 0, reg);
-		} catch (SourceException e) {
-			mLog.error("nios_8x32_read failed", e);
-		}
-	}
-
-	public void nios_8x32_read(BladeNiosPKT id, int addr, long reg) throws SourceException {
-		ByteBuffer buf = ByteBuffer.allocate(NIOS_PKT_LEN);
-		boolean success;
-		
-		try {
-			nios_8x32_pack(buf, BladeNiosPKT.NIOS_PKT_8x32_TARGET_RFFE_CSR, false, 0, reg);
-		} catch (SourceException e) {
-			mLog.error("nios_8x32_pack failed", e);
-		}
-
-		try {
-			nios_access(buf);
-		} catch (SourceException e) {
-			mLog.error("nios_access failed", e);
-		}
-	}
-
-	public void nios_8x32_pack(ByteBuffer buf, BladeNiosPKT id, boolean write, long addr, long data) throws SourceException {
-		buf.put(Nios8x32Packet.IDX_MAGIC, Nios8x32Packet.MAGIC);
-    	buf.put(Nios8x32Packet.IDX_TARGET_ID, id.getRequestNumber());
-
-		buf.put(Nios8x32Packet.IDX_FLAGS, write ? (byte) Nios8x32Packet.FLAG_WRITE : (byte) 0x00);
-
-		buf.put(Nios8x32Packet.IDX_RESV1, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_ADDR, (byte) (addr & 0xFF));
-
-		buf.put(Nios8x32Packet.IDX_DATA + 0, (byte) (data & 0xFF));
-		buf.put(Nios8x32Packet.IDX_DATA + 1, (byte) ((data >> 8) & 0xFF));
-		buf.put(Nios8x32Packet.IDX_DATA + 2, (byte) ((data >> 16) & 0xFF));
-		buf.put(Nios8x32Packet.IDX_DATA + 3, (byte) ((data >> 24) & 0xFF));
-
-		buf.put(Nios8x32Packet.IDX_RESV2 + 0, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 1, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 2, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 3, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 4, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 5, (byte) 0x00);
-		buf.put(Nios8x32Packet.IDX_RESV2 + 6, (byte) 0x00);
-	}
+	// //}
 
 	/**
 	 * Not implemented
@@ -365,17 +273,18 @@ public class BladeRFTunerController extends USBTunerController {
 		int shift;
 		switch (ch) {
 			case RX_CHANNEL_0:
-				shift = RFFE_CONTROL_RX_SPDT_1;
+				shift = BladeRFControlRFFE.BladeRFFEControl.RFFE_CONTROL_RX_SPDT_1.getRequestNumber();
 				break;
 			case RX_CHANNEL_1:
-				shift = RFFE_CONTROL_RX_SPDT_2;
+				shift = BladeRFControlRFFE.BladeRFFEControl.RFFE_CONTROL_RX_SPDT_2.getRequestNumber();
 				break;
 			default:
 				throw new IllegalArgumentException("Invalid Channel");
 		}
 
 		// Clear existing SPDT bits
-		reg &= ~(RFFE_CONTROL_SPDT_MASK << shift);
+		int rffe_control_spdt_mask = BladeRFControlRFFE.BladeRFFEControl.RFFE_CONTROL_SPDT_MASK.getRequestNumber();
+		reg &= ~(rffe_control_spdt_mask << shift);
 
 		// Set new bits from port map
 		reg |= (portMap.mRequestNumber << shift);
@@ -508,19 +417,39 @@ public class BladeRFTunerController extends USBTunerController {
 	 * Begin Enum Section
 	 */
 
-	public enum BladeNiosPKT {
-		NIOS_PKT_8x32_TARGET_RFFE_CSR((byte) 0x03); // RFFE control & status GPIO
+	// public enum BladeRFFEControl {
+	// 	RFFE_CONTROL_RESET_N(0),
+	// 	RFFE_CONTROL_ENABLE(1),
+	// 	RFFE_CONTROL_TXNRX(2),
+	// 	RFFE_CONTROL_EN_AGC(3),
+	// 	RFFE_CONTROL_SYNC_IN(4),
+	// 	RFFE_CONTROL_RX_BIAN_EN(5),
+	// 	RFFE_CONTROL_RX_SPDT_1(6), // 6 and 7
+	// 	RFFE_CONTROL_RX_SPDT_2(8), // 8 and 9
+	// 	RFFE_CONTROL_TX_BIAN_EN(10),
+	// 	RFFE_CONTROL_TX_SPDT_1(11), // 11 and 12
+	// 	RFFE_CONTROL_TX_SPDT_2(13), // 13 and 14
+	// 	RFFE_CONTROL_MIMO_RX_EN_0(15),
+	// 	RFFE_CONTROL_MIMO_TX_EN_0(16),
+	// 	RFFE_CONTROL_MIMO_RX_EN_1(17),
+	// 	RFFE_CONTROL_MIMO_TX_EN_1(18),
+	// 	RFFE_CONTROL_AD_MUXOUT(19), // input only
+	// 	RFFE_CONTROL_CTRL_OUT(24), // input only, 24 through 31
+	// 	RFFE_CONTROL_SPDT_MASK(0x3),
+	// 	RFFE_CONTROL_SPDT_SHUTDOWN(0x0), // no connection
+	// 	RFFE_CONTROL_SPDT_LOWBAND(0x2), // RF1 <-> RF3
+	// 	RFFE_CONTROL_SPDT_HIGHBAND(0x1); // RF1 <-> RF2
 
-		private byte mRequestNumber;
+	// 	private int mRequestNumber;
 
-		BladeNiosPKT(byte number) {
-			mRequestNumber = number;
-		}
+	// 	BladeRFFEControl(int number) {
+	// 		mRequestNumber = number;
+	// 	}
 
-		public byte getRequestNumber() {
-			return mRequestNumber;
-		}
-	}
+	// 	public int getRequestNumber() {
+	// 		return mRequestNumber;
+	// 	}
+	// }
 
 	public enum BladeUSBBackend {
 		SAMPLE_EP_IN((byte) 0x81),
@@ -592,29 +521,29 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 	}
 
-	public enum BladeRFICCommand {
-		BLADERF_RFIC_COMMAND_STATUS((byte) 0x00), // query the status register (read)
-		BLADERF_RFIC_COMMAND_INIT((byte) 0x01), // initalized RFIC (read/write)
-		BLADERF_RFIC_COMMAND_ENABLE((byte) 0x02), // enable or disable a channel (read/write)
-		BLADERF_RFIC_COMMAND_SAMPLERATE((byte) 0x03), // sample rate for channel (read/write)
-		BLADERF_RFIC_COMMAND_FREQUENCY((byte) 0x04), // center freq for channel (read/write)
-		BLADERF_RFIC_COMMAND_BANDWIDTH((byte) 0x05), // bandwidth for channel (read/write)
-		BLADERF_RFIC_COMMAND_GAINMODE((byte) 0x06), // gain mode for channel (read/write)
-		BLADERF_RFIC_COMMAND_GAIN((byte) 0x07), // overall gain for channel (read/write)
-		BLADERF_RFIC_COMMAND_RSSI((byte) 0x08), // RSSI for channel (read)
-		BLADERF_RFIC_COMMAND_FILTER((byte) 0x09), // FIR filter for channel (read/write)
-		BLADERF_RFIC_COMMAND_TXMUTE((byte) 0x0A); // TX Mute for channel (write)
+	// public enum BladeRFICCommand {
+	// 	BLADERF_RFIC_COMMAND_STATUS((byte) 0x00), // query the status register (read)
+	// 	BLADERF_RFIC_COMMAND_INIT((byte) 0x01), // initalized RFIC (read/write)
+	// 	BLADERF_RFIC_COMMAND_ENABLE((byte) 0x02), // enable or disable a channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_SAMPLERATE((byte) 0x03), // sample rate for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_FREQUENCY((byte) 0x04), // center freq for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_BANDWIDTH((byte) 0x05), // bandwidth for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_GAINMODE((byte) 0x06), // gain mode for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_GAIN((byte) 0x07), // overall gain for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_RSSI((byte) 0x08), // RSSI for channel (read)
+	// 	BLADERF_RFIC_COMMAND_FILTER((byte) 0x09), // FIR filter for channel (read/write)
+	// 	BLADERF_RFIC_COMMAND_TXMUTE((byte) 0x0A); // TX Mute for channel (write)
 
-		private byte mRequestNumber;
+	// 	private byte mRequestNumber;
 
-		BladeRFICCommand(byte number) {
-			mRequestNumber = number;
-		}
+	// 	BladeRFICCommand(byte number) {
+	// 		mRequestNumber = number;
+	// 	}
 
-		public byte getRequestNumber() {
-			return mRequestNumber;
-		}
-	}
+	// 	public byte getRequestNumber() {
+	// 		return mRequestNumber;
+	// 	}
+	// }
 
 	public enum Request {
 		OPEN_BLADERF((byte) 0x01),
@@ -760,33 +689,6 @@ public class BladeRFTunerController extends USBTunerController {
 		}
 
 		public String getLabel() {
-			return mLabel;
-		}
-	}
-
-	public enum Mode {
-		OFF((byte) 0x00, "Off"),
-		RECEIVE((byte) 0x01, "Receive"),
-		TRANSMIT((byte) 0x02, "Transmit"),
-		SS((byte) 0x33, "SS");
-
-		private byte mNumber;
-		private String mLabel;
-
-		Mode(byte number, String label) {
-			mNumber = number;
-			mLabel = label;
-		}
-
-		public byte getNumber() {
-			return mNumber;
-		}
-
-		public String getLabel() {
-			return mLabel;
-		}
-
-		public String toString() {
 			return mLabel;
 		}
 	}
