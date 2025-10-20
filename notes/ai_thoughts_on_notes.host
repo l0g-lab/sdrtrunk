@@ -1,0 +1,268 @@
+BladeRF Frequency Setting - Full Breakdown
+
+Since C isn't object-oriented, there is significant abstraction to ensure that the code and logic work for multiple versions of the bladeRF (v1 / v2). We need to peel back all the layers to reach the lower-level registry reads/writes required to configure the bladeRF.
+
+Below are code snippets for setting the frequency. My hope is that, once we work through this, we can implement the remaining requirements to fully configure the bladeRF and ultimately pass data into sdr-trunk.
+
+Regarding the controller choice ("FPGA" or "Host"), I’m still uncertain. It seems that the object-oriented-like C code allows for either, but I don't yet know which to use. The current implementation assumes FPGA, as that’s where I’ve focused so far.
+Top-Level API
+
+The function bladerf_set_frequency is the user-facing API for setting the frequency. It takes arguments (device, channel, frequency) and passes them to the function pointer dev->board->set_frequency.
+Code Snippet: bladerf_set_frequency (in bladerf.c)
+
+/******************************************************************************/
+/* Frequency */
+/******************************************************************************/
+
+int bladerf_set_frequency(struct bladerf *dev,
+                          bladerf_channel ch,
+                          bladerf_frequency frequency)
+{
+    int status;
+    MUTEX_LOCK(&dev->lock);
+
+    status = dev->board->set_frequency(dev, ch, frequency);
+
+    if (dev->gain_tbls[ch].enabled && status == 0) {
+        status = apply_gain_correction(dev, ch, frequency);
+        if (status != 0) {
+            log_error("Failed to set gain correction\n");
+        }
+    }
+
+    MUTEX_UNLOCK(&dev->lock);
+    return status;
+}
+
+This function passes parameters to dev->board->set_frequency, which is defined in board_fns to provide board-specific implementations for the frequency-setting logic.
+Code Snippet: board.h (defining board_fns)
+
+struct bladerf {
+    /* Backend-specific implementations */
+    const struct backend_fns *backend;
+
+    /* Board-specific implementations */
+    const struct board_fns *board;
+}
+
+struct board_fns {
+    int (*set_frequency)(struct bladerf *dev,
+                         bladerf_channel ch,
+                         bladerf_frequency frequency);
+}
+
+extern const struct board_fns *bladerf_boards[];
+
+Second Layer: bladerf2.c
+
+This layer is called by dev->board->set_frequency(dev, ch, frequency) from the previous section. It passes parameters to another function pointer, board_data->rfic->set_frequency, which is defined in the bladerf2 board structure.
+Code Snippet: bladerf2_set_frequency (in bladerf2.c)
+
+/******************************************************************************/
+/* Frequency */
+/******************************************************************************/
+
+static int bladerf2_set_frequency(struct bladerf *dev,
+                                  bladerf_channel ch,
+                                  bladerf_frequency frequency)
+{
+    CHECK_BOARD_STATE(STATE_INITIALIZED);
+
+    struct bladerf2_board_data *board_data = dev->board_data;
+
+    return board_data->rfic->set_frequency(dev, ch, frequency);
+}
+
+...
+
+struct board_fns const bladerf2_board_fns = {
+    FIELD_INIT(.set_frequency, bladerf2_set_frequency)
+}
+
+Third Layer: rfic_host.c
+
+At this layer, the set_frequency function is further abstracted and works with the RFIC (Radio Frequency Integrated Circuit).
+Code Snippet: _rfic_host_set_frequency (in rfic_host.c)
+
+/******************************************************************************/
+/* Frequency */
+/******************************************************************************/
+
+static int _rfic_host_set_frequency(struct bladerf *dev,
+                                    bladerf_channel ch,
+                                    bladerf_frequency frequency)
+{
+    struct bladerf2_board_data *board_data = dev->board_data;
+    struct ad9361_rf_phy *phy              = board_data->phy;
+    struct controller_fns const *rfic      = board_data->rfic;
+    struct bladerf_range const *range      = NULL;
+
+    CHECK_STATUS(dev->board->get_frequency_range(dev, ch, &range));
+
+    if (!is_within_range(range, frequency)) {
+        return BLADERF_ERR_RANGE;
+    }
+
+    /* Set up band selection */
+    CHECK_STATUS(rfic->select_band(dev, ch, frequency));
+
+    /* Change LO frequency */
+    if (BLADERF_CHANNEL_IS_TX(ch)) {
+        CHECK_AD936X(ad9361_set_tx_lo_freq(phy, frequency));
+    } else {
+        CHECK_AD936X(ad9361_set_rx_lo_freq(phy, frequency));
+    }
+
+    return 0;
+}
+
+Helper Macros: CHECK_STATUS and CHECK_AD936X
+
+The CHECK_STATUS macro checks the return status of functions and returns early if an error is encountered.
+Code Snippet: CHECK_STATUS (in common.h)
+
+/**
+ * @brief   Call a function and return early if it fails
+ *
+ * @param   _fn   The function
+ *
+ * @return  function return value if less than zero; continues otherwise
+ */
+#define CHECK_STATUS(_fn)                  \
+    do {                                   \
+        int _s = _fn;                      \
+        if (_s < 0) {                      \
+            RETURN_ERROR_STATUS(#_fn, _s); \
+        }                                  \
+    } while (0)
+
+Next Stage: Select Band
+
+The select_band function is responsible for selecting the appropriate band based on frequency. It reads the RFFE control register, modifies the SPDT (Single-Pole, Double-Throw) bits, and writes back to the register.
+Code Snippet: _rfic_host_select_band (in rfic_host.c)
+
+static int _rfic_host_select_band(struct bladerf *dev,
+                                  bladerf_channel ch,
+                                  bladerf_frequency frequency)
+{
+    struct bladerf2_board_data *board_data = dev->board_data;
+    struct ad9361_rf_phy *phy              = board_data->phy;
+    uint32_t reg;
+    size_t i;
+
+    /* Read RFFE control register */
+    CHECK_STATUS(dev->backend->rffe_control_read(dev, &reg));
+
+    /* Modify the SPDT bits */
+    for (i = 0; i < 2; ++i) {
+        bladerf_channel bch = BLADERF_CHANNEL_IS_TX(ch) ? BLADERF_CHANNEL_TX(i)
+                                                        : BLADERF_CHANNEL_RX(i);
+        CHECK_STATUS(_modify_spdt_bits_by_freq(
+            &reg, bch, _rffe_ch_enabled(reg, bch), frequency));
+    }
+
+    /* Write RFFE control register */
+    CHECK_STATUS(dev->backend->rffe_control_write(dev, reg));
+
+    /* Set AD9361 port */
+    CHECK_STATUS(
+        set_ad9361_port_by_freq(phy, ch, _rffe_ch_enabled(reg, ch), frequency));
+
+    return 0;
+}
+
+Read and Write to the RFFE Control Register
+
+The RFFE control register is read and written using the functions defined in usb.c, which perform USB control transfers.
+Code Snippet: nios_rffe_control_read (in usb.c)
+
+int nios_rffe_control_read(struct bladerf *dev, uint32_t *value)
+{
+    int status;
+
+    status = nios_8x32_read(dev, NIOS_PKT_8x32_TARGET_RFFE_CSR, 0, value);
+
+    if (status == 0) {
+        log_verbose("%s: Read 0x%08x\n", __FUNCTION__, *value);
+    }
+
+    return status;
+}
+
+The nios_8x32_read function interacts with the FPGA over USB, reading the RFFE control register.
+Modify SPDT Bits by Frequency
+
+The _modify_spdt_bits_by_freq function is responsible for modifying the SPDT bits based on the frequency. This is used to determine which band the device should use.
+Code Snippet: _modify_spdt_bits_by_freq
+
+int _modify_spdt_bits_by_freq(uint32_t *reg,
+                              bladerf_channel ch,
+                              bool enabled,
+                              bladerf_frequency freq)
+{
+    struct band_port_map const *port_map;
+    uint32_t shift;
+
+    if (NULL == reg) {
+        return BLADERF_ERR_INVAL;
+    }
+
+    port_map = _get_band_port_map_by_freq(ch, enabled ? freq : 0);
+
+    if (NULL == port_map) {
+        return BLADERF_ERR_INVAL;
+    }
+
+    switch (ch) {
+        case BLADERF_CHANNEL_RX(0):
+            shift = RFFE_CONTROL_RX_SPDT_1;
+            break;
+        case BLADERF_CHANNEL_RX(1):
+            shift = RFFE_CONTROL_RX_SPDT_2;
+            break;
+        case BLADERF_CHANNEL_TX(0):
+            shift = RFFE_CONTROL_TX_SPDT_1;
+            break;
+        case BLADERF_CHANNEL_TX(1):
+            shift = RFFE_CONTROL_TX_SPDT_2;
+            break;
+        default:
+            return BLADERF_ERR_INVAL;
+    }
+
+    *reg &= ~(RFFE_CONTROL_SPDT_MASK << shift);
+    *reg |= port_map->spdt << shift;
+
+    return 0;
+}
+
+Write the RFFE Control Register
+
+Once the RFFE control register is set correctly, we need to write it back to the device using the rffe_control_write function. This ensures that the settings are applied.
+Set AD9361 Frequency
+
+The final step in frequency selection involves setting the frequency on the AD9361 RF board. This is done by calling the set_ad9361_port_by_freq function.
+Code Snippet: set_ad9361_port_by_freq
+
+int set_ad9361_port_by_freq(struct ad9361_rf_phy *phy,
+                            bladerf_channel ch,
+                            bool enabled,
+                            bladerf_frequency freq)
+{
+    struct band_port_map const *port_map = NULL;
+    int status;
+
+    port_map = _get_band_port_map_by_freq(ch, enabled ? freq : 0);
+
+    if (NULL == port_map) {
+        return BLADERF_ERR_INVAL;
+    }
+
+    if (BLADERF_CHANNEL_IS_TX(ch)) {
+        status = ad9361_set_tx_rf_port_output(phy, port_map->rfic_port);
+    } else {
+        status = ad9361_set_rx_rf_port_input(phy, port_map->rfic_port);
+    }
+
+    return errno_ad9361_to_bladerf(status);
+}
